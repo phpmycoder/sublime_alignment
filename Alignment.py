@@ -126,9 +126,54 @@ class AlignmentCommand(sublime_plugin.TextCommand):
                 max_col = 0
                 for row in line_nums:
                     pt = view.text_point(row, 0)
-                    matching_region = view.find(alignment_pattern, pt)
-                    if not matching_region:
+
+                    # Grab the whole line that we're dealing with...we'll parse for quoted regions
+                    full_line = view.substr(view.line(pt))
+                    # stores the Region objects, where the last region started and the queue of quote chars
+                    quote_regions, quote_region_start, quote_stack = [], None, []
+
+                    for idx, c in enumerate(full_line):
+                        if c == '"' or c == "'":
+                            # if we aren' within quotes, start a new region
+                            if len(quote_stack) == 0:
+                                quote_stack.append(c)
+                                quote_region_start = pt + idx
+
+                            # if the last quote is the same as this one, they cancel
+                            elif quote_stack[-1] == c:
+                                quote_stack.pop()
+
+                                # if we are outside of quotes, end the region
+                                if len(quote_stack) == 0:
+                                    quote_regions.append(Region(quote_region_start, pt + idx))
+
+                            # otherwise, indicate that we have entered a new quoting level
+                            else:
+                                quote_stack.append(c)
+
+                    # We need to find an alignment_pattern not in the quoted_regions
+                    search_point = pt
+                    while True:
+                        # Try to find one from the last point from which we searched
+                        matching_region = view.find(alignment_pattern, search_pt)
+
+                        # Give up on no match or if we reach the next line
+                        if not matching_region or view.lines(matching_region) != [row]:
+                            break
+
+                        # Determine if matched is within of the quoted regions
+                        for quote_region in quote_regions:
+                            # Repeat search again from end of quote region containing last match
+                            if quote_region.contains(matching_region):
+                                search_pt = quote_region.b
+                                continue
+
+                        # Otherwise, we found a non-quoted match
+                        break
+
+                    if not matching_region or view.lines(matching_region) != [row]:
                         continue
+
                     matching_char_pt = matching_region.a
 
                     insert_pt = matching_char_pt
